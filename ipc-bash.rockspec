@@ -1,6 +1,7 @@
 
 package = 'ipc-bash'
 version = '0.0.1-1'
+noarch = true
 source = {
   url = "git://github.com/huakim/lua-ipc-bash.git",
  }
