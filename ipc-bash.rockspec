@@ -20,7 +20,7 @@ dependencies = {
   "lua >= 5.1",
   'posix',
   'subprocess',
-  'file-util-tempdir'
-  'lua-path'
-  'luafilesystem'
+  'file-util-tempdir',
+  'lua-path',
+  'luafilesystem',
  }
