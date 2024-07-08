@@ -19,7 +19,7 @@ build = {
  }
 dependencies = {
   "lua >= 5.1",
-  'posix',
+  'luaposix',
   'subprocess',
   'file-util-tempdir',
   'lua-path',
