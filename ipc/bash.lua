@@ -174,6 +174,10 @@ end
 IPC_Bash.random_ascii_chars = random_chars
 IPC_Bash.shell_string = sh_str
 
+function IPC_Bash:fix_shell()
+    return self:runcmd(BASH_SECRET_KEY .. 'unset')
+end
+
 function IPC_Bash.newShell(tab)
     if nil == tab
     then
