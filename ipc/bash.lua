@@ -99,15 +99,19 @@ function IPC_Bash.extend_bash_program(...)
     end
 end
 
-function IPC_Bash.bash_code_table(pattern)
-    local bashprog = setmetatable(
-{},
+function IPC_Bash.bash_code_table(pattern, bashprogtable)
+    if bashprogtable == nil
+    then
+        bashprogtable = {}
+    end
+    setmetatable(
+bashprogtable,
 {['__newindex']=function(self, name, code)
     code = IPC_Bash.bash_code(code, pattern)
-    setraw(self, name, code)
+    rawset(self, name, code)
 end
 })
-    return bashprog
+    return bashprogtable
 end
 
 local bashprog = IPC_Bash.bash_code_table('Tbr_')
