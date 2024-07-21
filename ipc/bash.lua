@@ -33,11 +33,17 @@ local function random_chars(len)
 end
 
 local function sh_str(value)
-   return '"'..value:gsub("\\", "\\\\"):gsub('"','\\"'):gsub('`','\\`'):gsub('%$', '\\$')..'"'
+    if value
+    then
+        value = '' .. value
+    else
+        value = ''
+    end
+    return '"'..value:gsub("\\", "\\\\"):gsub('"','\\"'):gsub('`','\\`'):gsub('%$', '\\$')..'"'
 end
 
-local BASH_SECRET_KEY = 'F' .. random_chars(12) .. '_'
-local BASH_PROGRAM = string.gsub([[
+local BASHKEY = 'F' .. random_chars(12) .. '_'
+local BASHPROG = string.gsub([[
 
 Tbr_temp="${Tbr_temp:-.}"
 
@@ -112,17 +118,62 @@ Tbr_loop(){
 
 Tbr_loop
 
-
-]], 'Tbr_', BASH_SECRET_KEY)
+]], 'Tbr_', BASHKEY)
 
 local IPC_Bash = {}
 IPC_Bash.__index = IPC_Bash
 IPC_Bash.sh_str = sh_str
-IPC_Bash.BASH_PROGRAM = BASH_PROGRAM
-IPC_Bash.BASH_SECRET_KEY = BASH_SECRET_KEY
+IPC_Bash.BASH_PROGRAM = BASHPRG
+IPC_Bash.BASH_SECRET_KEY = BASHKEY
+
+local FormatMetatable = {}
+function FormatMetatable:__tostring()
+    return self.str:gsub(self.fmt, IPC_Bash.BASH_SECRET_KEY)
+end
+
+function pkg.bash_code(code, override)
+    if nil == override
+    then
+        return code
+    else
+        return setmetatable({
+            fmt = override,
+            str = code
+        }, FormatMetatable)
+    end
+end
+
+function IPC_Bash.import_plugin(name)
+    local plugin = require(name)
+    if type(plugin) == 'table'
+    then
+        local bashkey = self.BASH_SECRET_KEY
+        local bashtable = plugin.bash_code_table
+        if type(bashtable) == 'table'
+        then
+            for name, code in pairs(bashtable)
+            do
+                bashtable[#bashtable+1] = bashkey..name..[[(){
+]]..code..[[
+}
+]]
+            end
+        end
+        bashtable[#bashtable] = self.BASH_PROGRAM
+        self.BASH_PROGRAM = table.concat(bashtable)
+        local functable = plugin.bash_function_table
+        if type(functable) == 'table'
+        then
+            for name, code in pairs(functable)
+            do
+                IPC_Bash[name] = code
+            end
+        end
+    end
+end
 
 local function open_and_read(self, func, funcname, name)
-    self:runcmd(BASH_SECRET_KEY..'echo_'..funcname..' '..sh_str(name)..' | '..BASH_SECRET_KEY..'cat')
+    self:runcmd(self.BASH_SECRET_KEY..'echo_'..funcname..' '..sh_str(name)..' | '..self.BASH_SECRET_KEY..'cat')
     local file = io.open(self.output, 'r')
     local ret = func(file)
     file:close()
@@ -175,7 +226,7 @@ IPC_Bash.random_ascii_chars = random_chars
 IPC_Bash.shell_string = sh_str
 
 function IPC_Bash:fix_shell()
-    return self:runcmd(BASH_SECRET_KEY .. 'unset')
+    return self:runcmd(self.BASH_SECRET_KEY .. 'unset')
 end
 
 function IPC_Bash.newShell(tab)
@@ -199,15 +250,15 @@ function IPC_Bash.newShell(tab)
 end
 
 function IPC_Bash.key()
-    return BASH_SECRET_KEY
+    return IPC_Bash.BASH_SECRET_KEY
 end
 
 function IPC_Bash:exit()
-    return self:runcmd(BASH_SECRET_KEY .. 'exit')
+    return self:runcmd(self.BASH_SECRET_KEY .. 'exit')
 end
 
 function IPC_Bash:subsh()
-    return self:runcmd(BASH_SECRET_KEY .. 'loop')
+    return self:runcmd(self.BASH_SECRET_KEY .. 'loop')
 end
 
 function IPC_Bash:join()
@@ -254,7 +305,7 @@ function IPC_Bash:open()
         posix.mkfifo(output)
         posix.mkfifo(retcode)
         local bash = self.bash
-        local proc = subprocess.popen( { bash, '-c', BASH_PROGRAM, env={[BASH_SECRET_KEY..'temp']=temp} } )
+        local proc = subprocess.popen( { bash, '-c', self.BASH_PROGRAM, env={[self.BASH_SECRET_KEY..'temp']=temp} } )
         self.proc = proc
         self.pid = proc.pid
  --       self.thread = coroutine.create(function()
@@ -279,7 +330,7 @@ function IPC_Bash:source(path)
 end
 
 function IPC_Bash:runcmd_capture(data)
-    self:runcmd(BASH_SECRET_KEY..'echo "$('..data..')"')
+    self:runcmd(self.BASH_SECRET_KEY..'echo "$('..data..')"')
     return self:recv()
 end
 
@@ -380,11 +431,11 @@ function IPC_Bash.type_format(type)
     end
 end
 
-function IPC_Bash.bash_format(name, value, type)
-    local type = IPC_Bash.type_format(type)
-    local subr = type.isnumber and function(v) return tostring(tonumber(v)) end or sh_str
+function IPC_Bash.bash_format(name, value, vartype)
+    local vartype = IPC_Bash.type_format(vartype)
+    local subr = vartype.isnumber and function(v) return tostring(tonumber(v)) end or sh_str
     local list = {'typeset '}
-    if type.ismap then
+    if vartype.ismap then
         table.insert(list, '-A ')
         table.insert(list, name)
         table.insert(list, '=(')
@@ -405,7 +456,7 @@ function IPC_Bash.bash_format(name, value, type)
             table.insert(list, subr(value))
         end
         table.insert(list, ' )')
-    elseif type.isarray then
+    elseif vartype.isarray then
         table.insert(list, '-a ')
         table.insert(list, name)
         table.insert(list, '=(')
