@@ -47,75 +47,6 @@ local BASHPROG = string.gsub([[
 
 Tbr_temp="${Tbr_temp:-.}"
 
-Tbr_echo(){
-   /bin/echo -n "${@}" > "${Tbr_temp}/output.sock" &
-}
-
-Tbr_cat(){
-   /bin/cat > "${Tbr_temp}/output.sock" &
-}
-
-Tbr_retcode(){
-   /bin/echo "$1" > "${Tbr_temp}/retcode.sock"
-}
-
-Tbr_recv(){
-   /bin/cat "${Tbr_temp}/input.sock"
-}
-
-Tbr_echo_node(){
-   for i in "${@}"
-   do
-      echo "${#i}"
-      echo -n "${i}"
-      echo
-   done
-}
-
-Tbr_echo_value(){
-   eval "Tbr_echo_node \"\$${1}\""
-}
-
-Tbr_echo_array(){
-   eval "echo \"\${#${1}[@]}\""
-   eval "Tbr_echo_node \"\${${1}[@]}\""
-}
-
-Tbr_echo_table(){
-   eval "echo \"\${#${1}[@]}\""
-   eval "
-for i in \"\${!${1}[@]}\"; do
-Tbr_echo_node \"\${i}\" \"\${${1}[\"\${i}\"]}\";
-done"
-}
-
-Tbr_unset(){
-    POSIXLY_CORRECT=1
-    unset eval
-    unset builtin
-}
-
-Tbr_exit(){
-   /bin/kill -SIGTERM "${Tbr_PID}"
-}
-
-Tbr_loop(){
-(
-   Tbr_PID=${BASHPID}
-   while (( "1" ))
-   do
-      (
-         while (( "1" ))
-         do
-            eval "$(Tbr_recv)"
-            Tbr_retcode "$?"
-            Tbr_unset
-         done
-      )
-   done
-)
-}
-
 Tbr_loop
 
 ]], 'Tbr_', BASHKEY)
@@ -131,7 +62,7 @@ function FormatMetatable:__tostring()
     return self.str:gsub(self.fmt, IPC_Bash.BASH_SECRET_KEY)
 end
 
-function pkg.bash_code(code, override)
+function IPC_Bash.bash_code(code, override)
     if nil == override
     then
         return code
@@ -143,34 +74,125 @@ function pkg.bash_code(code, override)
     end
 end
 
-function IPC_Bash.import_plugin(name)
-    local plugin = require(name)
-    if type(plugin) == 'table'
-    then
-        local bashkey = self.BASH_SECRET_KEY
-        local bashtable = plugin.bash_code_table
-        if type(bashtable) == 'table'
+function IPC_Bash.extend_bash_program(...)
+    local bashtable = {}
+    local length = 0
+    local bashkey = IPC_Bash.BASH_SECRET_KEY
+    local parm={...}
+    for i=1,#parm do
+        local functable = parm[i]
+        if type(functable) == 'table'
         then
-            for name, code in pairs(bashtable)
+            for name, code in pairs(functable)
             do
-                bashtable[#bashtable+1] = bashkey..name..[[(){
+                length = length + 1
+                bashtable[length] = bashkey..name..[[(){
 ]]..code..[[
 }
 ]]
             end
         end
-        bashtable[#bashtable] = self.BASH_PROGRAM
-        self.BASH_PROGRAM = table.concat(bashtable)
-        local functable = plugin.bash_function_table
-        if type(functable) == 'table'
-        then
-            for name, code in pairs(functable)
-            do
-                IPC_Bash[name] = code
-            end
-        end
+    end
+    if not (length == 0)
+    then
+        IPC_Bash.BASH_PROGRAM = table.concat(bashtable) .. IPC_Bash.BASH_PROGRAM
     end
 end
+
+function IPC_Bash.bash_code_table(pattern)
+    local bashprog = setmetatable(
+{},
+{['__newindex']=function(self, name, code)
+    code = IPC_Bash.bash_code(code, pattern)
+    setraw(self, name, code)
+end
+})
+    return bashprog
+end
+
+local bashprog = IPC_Bash.bash_code_table('Tbr_')
+
+bashprog.echo = [[
+
+   /bin/echo -n "${@}" > "${Tbr_temp}/output.sock" &
+]]
+
+bashprog.cat = [[
+
+   /bin/cat > "${Tbr_temp}/output.sock" &
+]]
+
+bashprog.retcode = [[
+
+   /bin/echo "$1" > "${Tbr_temp}/retcode.sock"
+]]
+
+bashprog.recv = [[
+
+   /bin/cat "${Tbr_temp}/input.sock"
+]]
+
+bashprog.echo_node = [[
+
+   for i in "${@}"
+   do
+      echo "${#i}"
+      echo -n "${i}"
+      echo
+   done
+]]
+
+bashprog.echo_value = [[
+
+   eval "Tbr_echo_node \"\$${1}\""
+]]
+
+bashprog.echo_array = [[
+
+   eval "echo \"\${#${1}[@]}\""
+   eval "Tbr_echo_node \"\${${1}[@]}\""
+]]
+
+bashprog.echo_table = [[
+
+   eval "echo \"\${#${1}[@]}\""
+   eval "
+for i in \"\${!${1}[@]}\"; do
+Tbr_echo_node \"\${i}\" \"\${${1}[\"\${i}\"]}\";
+done"
+]]
+
+bashprog.unset = [[
+
+    POSIXLY_CORRECT=1
+    unset eval
+    unset builtin
+]]
+
+bashprog.exit = [[
+
+   /bin/kill -SIGTERM "${Tbr_PID}"
+]]
+
+bashprog.loop = [[
+
+(
+   Tbr_PID=${BASHPID}
+   while (( "1" ))
+   do
+      (
+         while (( "1" ))
+         do
+            eval "$(Tbr_recv)"
+            Tbr_retcode "$?"
+            Tbr_unset
+         done
+      )
+   done
+)
+]]
+
+IPC_Bash.extend_bash_program(bashprog)
 
 local function open_and_read(self, func, funcname, name)
     self:runcmd(self.BASH_SECRET_KEY..'echo_'..funcname..' '..sh_str(name)..' | '..self.BASH_SECRET_KEY..'cat')
