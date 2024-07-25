@@ -62,30 +62,40 @@ function FormatMetatable:__tostring()
     return self.str:gsub(self.fmt, IPC_Bash.BASH_SECRET_KEY)
 end
 
-local builtin_str = [[
+local function createBuiltInMetatable(builtin_str)
+    local meta = {
+        __tostring = function (self)
+            return builtin_str:gsub('tpr_', IPC_Bash.BASH_SECRET_KEY):gsub('eval', self.name)
+        end
+    }
+    return setmetatable({}, {
+        __index = function(self, command)
+            return setmetatable({name=command}, meta)
+        end,
+        __newindex = function(self, name, value) end
+    })
+end
+
+local builtin = createBuiltInMetatable([[
 
 tpr_unset
 builtin command -p eval "${@}"
 return $?
-]];
+]])
 
-local BuiltinMetatable = {}
 
-function BuiltinMetatable:__tostring()
-    return builtin_str:gsub('tpr_', IPC_Bash.BASH_SECRET_KEY):gsub('eval', self.name)
-end
 
-local builtin = setmetatable({}, {
-__index = function(self, command)
-    return setmetatable({
-        name = command
-    }, BuiltinMetatable)
-end,
-__newindex = function(self, name, value)
-end
-})
+local levelup = createBuiltInMetatable([[
+
+tpr_retcode "0"
+eval "$0" -c "
+$(tpr_save_state)
+tpr_loop
+"
+]])
 
 IPC_Bash.builtin = builtin
+IPC_Bash.levelup = levelup
 
 function IPC_Bash.bash_code(code, override)
     if (nil == override)
@@ -148,6 +158,8 @@ end
 
 local bashprog = IPC_Bash.bash_code_table('Tbr_')
 
+bashprog.fakeroot = levelup.fakeroot
+bashprog.sudo = levelup.sudo
 bashprog.write = builtin.echo
 bashprog.read = builtin.read
 bashprog.eval = builtin.eval
@@ -264,7 +276,7 @@ Tbr_retcode "${1}${?}"
 
 bashprog.save_state = [[
   (
-  for Tbr_i in $(Tbr_get_all_vars -fr -uBASH_ARGC -uBASH_ARGV -uBASH_LINENO -uBASH_SOURCE -uBASH_VERSIONINFO -uFUNCNAME -uGROUPS -uBASHPID -uBASH_EXECUTION_STRING -uBASH_SUBSHELL -uBASH_COMMAND -uOPTIND -uOPTERR -uOPTARG)
+  for Tbr_i in $(Tbr_get_all_vars -fr -uBASH_ARGC -uBASH_ARGV -uBASH_LINENO -uBASH_SOURCE -uBASH_VERSIONINFO -uFUNCNAME -uGROUPS -uBASHPID -uBASH_EXECUTION_STRING -uBASH_SUBSHELL -uBASH_COMMAND -uOPTIND -uOPTERR -uOPTARG -uBASH_VERSINFO -uBASHOPTS -uBASH_VERSINFO -uEUID -uPPID -uSHELLOPTS -uUID )
   do
     Tbr_typeset -p "$Tbr_i"
   done
@@ -457,6 +469,14 @@ function IPC_Bash:flush()
     local hd2 = io.open(self.output, 'w+')
     hd2:write('')
     hd2:close()
+end
+
+function IPC_Bash:fakeroot()
+    return self:runcmd(self.BASH_SECRET_KEY..'fakeroot')
+end
+
+function IPC_Bash:sudo()
+    return self:runcmd(self.BASH_SECRET_KEY..'sudo')
 end
 
 function IPC_Bash:close()
