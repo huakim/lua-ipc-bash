@@ -47,14 +47,14 @@ local BASHPROG = string.gsub([[
 
 Tbr_temp="${Tbr_temp:-.}"
 
-Tbr_loop
+Tbr_loop "w$$p"
 
 ]], 'Tbr_', BASHKEY)
 
 local IPC_Bash = {}
 IPC_Bash.__index = IPC_Bash
 IPC_Bash.sh_str = sh_str
-IPC_Bash.BASH_PROGRAM = BASHPRG
+IPC_Bash.BASH_PROGRAM = BASHPROG
 IPC_Bash.BASH_SECRET_KEY = BASHKEY
 
 local FormatMetatable = {}
@@ -62,11 +62,40 @@ function FormatMetatable:__tostring()
     return self.str:gsub(self.fmt, IPC_Bash.BASH_SECRET_KEY)
 end
 
+local builtin_str = [[
+
+tpr_unset
+builtin command -p eval "${@}"
+return $?
+]];
+
+local BuiltinMetatable = {}
+
+function BuiltinMetatable:__tostring()
+    return builtin_str:gsub('tpr_', IPC_Bash.BASH_SECRET_KEY):gsub('eval', self.name)
+end
+
+local builtin = setmetatable({}, {
+__index = function(self, command)
+    return setmetatable({
+        name = command
+    }, BuiltinMetatable)
+end,
+__newindex = function(self, name, value)
+end
+})
+
+IPC_Bash.builtin = builtin
+
 function IPC_Bash.bash_code(code, override)
-    if nil == override
+    if (nil == override)
     then
         return code
     else
+        if not (type(code) == 'string')
+        then
+            return code
+        end
         return setmetatable({
             fmt = override,
             str = code
@@ -87,7 +116,7 @@ function IPC_Bash.extend_bash_program(...)
             do
                 length = length + 1
                 bashtable[length] = bashkey..name..[[(){
-]]..code..[[
+]]..tostring(code)..[[
 }
 ]]
             end
@@ -100,100 +129,226 @@ function IPC_Bash.extend_bash_program(...)
 end
 
 function IPC_Bash.bash_code_table(pattern, bashprogtable)
-    if bashprogtable == nil
-    then
-        bashprogtable = {}
-    end
-    setmetatable(
-bashprogtable,
+    bashprog = setmetatable(
+{},
 {['__newindex']=function(self, name, code)
     code = IPC_Bash.bash_code(code, pattern)
     rawset(self, name, code)
 end
 })
-    return bashprogtable
+    if type(bashprogtable) == 'table'
+    then
+        for key, value in pairs(bashprogtable)
+        do
+            bashprog[key] = value
+        end
+    end
+    return bashprog
 end
 
 local bashprog = IPC_Bash.bash_code_table('Tbr_')
 
+bashprog.write = builtin.echo
+bashprog.read = builtin.read
+bashprog.eval = builtin.eval
+bashprog.kill = builtin.kill
+bashprog.touch = builtin.touch
+bashprog.typeset = builtin.typeset
+bashprog.unset = builtin.unset
+bashprog.edit = builtin.sed
+bashprog.getopts = builtin.getopts
+
 bashprog.echo = [[
 
-   /bin/echo -n "${@}" > "${Tbr_temp}/output.sock" &
+   Tbr_write -n "${@}" > "${Tbr_temp}/output.sock" &
+]]
+
+bashprog.pwrite = [[
+(
+if (( $# == 0 ))
+then
+    Tbr_read -N 1073741824
+    Tbr_write -n "$REPLY"
+else
+    for Tbr_file in "${@}"
+    do
+        Tbr_read -N 1073741824 < "$Tbr_file"
+        Tbr_write -n "$REPLY"
+    done
+fi
+)
 ]]
 
 bashprog.cat = [[
-
-   /bin/cat > "${Tbr_temp}/output.sock" &
+    Tbr_pwrite > "${Tbr_temp}/output.sock" &
 ]]
 
 bashprog.retcode = [[
 
-   /bin/echo "$1" > "${Tbr_temp}/retcode.sock"
+   Tbr_write "$1" > "${Tbr_temp}/retcode.sock"
 ]]
 
 bashprog.recv = [[
-
-   /bin/cat "${Tbr_temp}/input.sock"
+   Tbr_pwrite < "${Tbr_temp}/input.sock"
 ]]
 
 bashprog.echo_node = [[
 
-   for i in "${@}"
+   for Tbr_i in "${@}"
    do
-      echo "${#i}"
-      echo -n "${i}"
-      echo
+      Tbr_write "${#Tbr_i}"
+      Tbr_write -n "${Tbr_i}"
+      Tbr_write
    done
 ]]
 
 bashprog.echo_value = [[
 
-   eval "Tbr_echo_node \"\$${1}\""
+   Tbr_eval "Tbr_echo_node \"\$${1}\""
 ]]
 
 bashprog.echo_array = [[
 
-   eval "echo \"\${#${1}[@]}\""
-   eval "Tbr_echo_node \"\${${1}[@]}\""
+   Tbr_eval "Tbr_write \"\${#${1}[@]}\""
+   Tbr_eval "Tbr_echo_node \"\${${1}[@]}\""
 ]]
 
 bashprog.echo_table = [[
 
-   eval "echo \"\${#${1}[@]}\""
-   eval "
-for i in \"\${!${1}[@]}\"; do
-Tbr_echo_node \"\${i}\" \"\${${1}[\"\${i}\"]}\";
+   Tbr_eval "Tbr_write \"\${#${1}[@]}\""
+   Tbr_eval "
+for Tbr_i in \"\${!${1}[@]}\"; do
+Tbr_echo_node \"\${Tbr_i}\" \"\${${1}[\"\${Tbr_i}\"]}\";
 done"
 ]]
 
 bashprog.unset = [[
 
     POSIXLY_CORRECT=1
-    unset eval
     unset builtin
 ]]
 
 bashprog.exit = [[
 
-   /bin/kill -SIGTERM "${Tbr_PID}"
+   Tbr_touch "${Tbr_temp}/exit.lock"
+   exit $(("$1"))
+]]
+
+bashprog.subsh = [[
+    Tbr_retcode "0"
+    Tbr_loop
 ]]
 
 bashprog.loop = [[
 
 (
-   Tbr_PID=${BASHPID}
    while (( "1" ))
    do
       (
          while (( "1" ))
          do
-            eval "$(Tbr_recv)"
+            Tbr_eval "$(Tbr_recv)"
             Tbr_retcode "$?"
-            Tbr_unset
          done
       )
+      if [[ -f "${Tbr_temp}/exit.lock" ]]..']]'..[[ ;
+      then
+        rm  "${Tbr_temp}/exit.lock"
+        break
+      fi
+      Tbr_retcode "$?"
    done
 )
+Tbr_retcode "${1}${?}"
+]]
+
+bashprog.save_state = [[
+  (
+  for Tbr_i in $(Tbr_get_all_vars -fr -uBASH_ARGC -uBASH_ARGV -uBASH_LINENO -uBASH_SOURCE -uBASH_VERSIONINFO -uFUNCNAME -uGROUPS -uBASHPID -uBASH_EXECUTION_STRING -uBASH_SUBSHELL -uBASH_COMMAND -uOPTIND -uOPTERR -uOPTARG)
+  do
+    Tbr_typeset -p "$Tbr_i"
+  done
+  Tbr_typeset -f
+  ) 2>/dev/null
+]]
+
+bashprog.get_all_vars = [[
+
+  Tbr_unset OPTIND OPTERR OPTARG getopts
+  Tbr_include_flags=""
+  Tbr_exclude_flags=""
+  Tbr_include_vars=""
+  Tbr_exclude_vars=":Tbr_exclude_vars::Tbr_include_vars::Tbr_exclude_flags::Tbr_include_flags:"
+  while getopts 's:u:t:f:' Tbr_flg
+  do
+    case "${Tbr_flg}" in
+       s) Tbr_include_vars="${Tbr_include_vars}:${OPTARG}:" ;;
+       u) Tbr_exclude_vars="${Tbr_exclude_vars}:${OPTARG}:" ;;
+       t) Tbr_include_flags="${Tbr_include_flags}${OPTARG}" ;;
+       f) Tbr_exclude_flags="${Tbr_exclude_flags}${OPTARG}" ;;
+    esac
+  done
+
+  (
+    declare(){
+      Tbr_echo_typeset "${@}"
+    }
+
+    typeset(){
+      Tbr_echo_typeset "${@}"
+    }
+
+    _(){
+       :
+    }
+
+    Tbr_Tbr_Tbr_value="$(Tbr_typeset -p)"
+    eval "{
+        ${Tbr_Tbr_Tbr_value}
+    }"
+  ) 2>/dev/null
+]]
+
+bashprog.echo_typeset = [[
+  Tbr_flags=""
+  Tbr_unset getopts OPTIND eval echo
+  while getopts 'aAilnrtux' Tbr_flg
+  do
+    if [[ "${Tbr_exclude_flags}" =~ "${Tbr_flgexit}" ]]..']]'..[[ ;
+    then
+        return
+    fi
+    Tbr_flags="${Tbr_flags}${Tbr_flg}"
+  done
+
+  Tbr_key="$(eval "echo \${$((OPTIND-1))}" | Tbr_edit -r 's/([^=]*).*/\1/')"
+
+  if [[ "${Tbr_exclude_vars}" =~ ":${Tbr_key}:" ]]..']]'..[[ ;
+  then
+    return
+  fi
+
+  if [[ -n "${Tbr_include_vars}" ]]..']]'..[[ ;
+  then
+    if [[ ! "${Tbr_include_vars}" =~ ":${Tbr_key}:" ]]..']]'..[[ ;
+    then
+      return
+    fi
+  fi
+
+  if [[ -n "${Tbr_include_flags}" ]]..']]'..[[ ;
+  then
+    for (( Tbr_i=0; Tbr_i<${#Tbr_include_flags}; Tbr_i++ ))
+    do
+      flg="${Tbr_include_flags:${Tbr_i}:1}"
+      if [[ ! "${Tbr_flags}" =~ "${Tbr_flg}" ]]..']]'..[[ ;
+      then
+        return
+      fi
+    done
+  fi
+
+  echo ${Tbr_key}
 ]]
 
 IPC_Bash.extend_bash_program(bashprog)
@@ -263,7 +418,7 @@ function IPC_Bash.newShell(tab)
     local self = setmetatable(tab, IPC_Bash)
     if nil == self.bash
     then
-      self.bash = 'ksh'
+      self.bash = 'bash'
     end
   --  self.temp = nil
   --  self.pid = nil
@@ -284,7 +439,7 @@ function IPC_Bash:exit()
 end
 
 function IPC_Bash:subsh()
-    return self:runcmd(self.BASH_SECRET_KEY .. 'loop')
+    return self:runcmd(self.BASH_SECRET_KEY .. 'subsh')
 end
 
 function IPC_Bash:join()
@@ -316,7 +471,7 @@ function IPC_Bash:close()
 end
 
 function IPC_Bash:open()
-    if not self.pid then
+    if nil == self.pid then
         local temp = tempdir.get_user_tempdir()
         temp = path.join(temp, random_chars(15))
         local input = path.join(temp, 'input.sock')
@@ -366,10 +521,21 @@ function IPC_Bash:runcmd(data)
     self:open()
     self:send(data)
     local file = io.open(self.retcode, 'r')
-    local result = tonumber(file:read("*l"))
+    local result = file:read("*l")
     file:close()
+    if result:sub(1,1) == 'w'
+    then
+        local pind = result:find('p')
+        local pid = tonumber(result:sub(2, pind-1))
+        local result = result:sub(pind+1)
+        if self.pid == pid
+        then
+            self.proc:wait()
+            self.pid = nil
+        end
+    end
 --    mutex:unlock()
-    return result
+    return tonumber(result)
 end
 
 local function shell_table(argtab)
@@ -414,7 +580,7 @@ function IPC_Bash:getvar(name, type)
         ret = get_value(self, name)
         if type.isnumber
         then
-            ret = tonumber(ret)
+            ret = tonumber(ret) or 0
         end
     else
         if type.ismap
