@@ -36,10 +36,10 @@ local function sh_str(value)
     if value
     then
         value = '' .. value
+        return '"'..value:gsub("\\", "\\\\"):gsub('"','\\"'):gsub('`','\\`'):gsub('%$', '\\$')..'"'
     else
-        value = ''
+        return '""'
     end
-    return '"'..value:gsub("\\", "\\\\"):gsub('"','\\"'):gsub('`','\\`'):gsub('%$', '\\$')..'"'
 end
 
 local BASHKEY = 'F' .. random_chars(12) .. '_'
