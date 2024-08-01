@@ -558,21 +558,21 @@ function IPC_Bash:runcmd(data)
     return tonumber(result)
 end
 
-local function shell_table(argtab)
+local function shell_table(...)
     local tab = {}
-    for k, v in ipairs(argtab)
+    for k, v in ipairs({...})
     do
         tab[k] = sh_str(v)
     end
     return table.concat(tab, ' ')
 end
 
-function IPC_Bash:execfunc(argtab)
-    return self:runcmd(shell_table(argtab))
+function IPC_Bash:execfunc(...)
+    return self:runcmd(shell_table(...))
 end
 
-function IPC_Bash:execfunc_capture(argtab)
-    return self:runcmd_capture(shell_table(argtab))
+function IPC_Bash:execfunc_capture(...)
+    return self:runcmd_capture(shell_table(...))
 end
 
 function IPC_Bash:send(data)
@@ -590,6 +590,10 @@ end
 
 function IPC_Bash:setvar(name, value, type)
     return self:runcmd(IPC_Bash.bash_format(name, value, type))
+end
+
+function IPC_Bash:delvar(...)
+    return self:execfunc(IPC_Bash.BASH_SECRET_KEY..'unset', ...)
 end
 
 function IPC_Bash:getvar(name, type)
@@ -620,34 +624,54 @@ function IPC_Bash:getvar(name, type)
     return ret
 end
 
-function IPC_Bash.type_format(type)
-    if type
-    then
-        local is_int = string.find(type, 'i')
-        local is_hash = string.find(type, 'A')
-        local is_list = string.find(type, 'a') and (not is_hash)
-        local is_var = (not is_hash) and (not is_list)
-        return {
-            isnumber = is_int,
-            ismap = is_hash,
-            isarray = is_list,
-            isvalue = is_var
-        }
-    else
-        return {
-            isnumber = false,
-            ismap = false,
-            isarray = false,
-            isvalue = true
-        }
+function IPC_Bash.type_format(ttype)
+    if ttype == nil then ttype = '' end
+    local ret = {}
+    for key, value in pairs({
+            isref = 'n',
+            isconst = 'r',
+            islower = 'l',
+            isupper = 'u',
+            isexport = 'x',
+            isnumber = 'i',
+            ismap = 'A',
+            isarray = 'a'
+        })
+    do
+        ret[key] = not (string.find(ttype, value) == nil)
     end
+    ret.isvalue = not (ret.ismap or ret.isarray)
+    for key, value in pairs({
+            islower = isupper,
+            ismap = isarray
+        })
+    do
+        if ret[key] then ret[value] = false end
+    end
+    return ret
 end
 
 function IPC_Bash.bash_format(name, value, vartype)
     local vartype = IPC_Bash.type_format(vartype)
     local subr = vartype.isnumber and function(v) return tostring(tonumber(v)) end or sh_str
     local list = {'typeset '}
-    if vartype.ismap then
+    for key, value in pairs({
+            isconst = 'r',
+            islower = 'l',
+            isupper = 'u',
+            isexport = 'x'
+        })
+    do
+        if vartype[key] then
+            table.insert(list, '-'..value..' ')
+        end
+    end
+    if vartype.isref then
+        table.insert(list, '-n ')
+        table.insert(list, name)
+        table.insert(list, '=')
+        table.insert(list, value)
+    elseif vartype.ismap then
         table.insert(list, '-A ')
         table.insert(list, name)
         table.insert(list, '=(')
