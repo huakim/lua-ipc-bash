@@ -1,9 +1,9 @@
-
+rockspec_format = '3.0'
 package = 'ipc-bash'
 version = 'scm-1'
 
 source = {
-  url = "git://github.com/huakim/lua-ipc-bash",
+  url = "https://codeload.github.com/huakim/lua-ipc-bash/zip/refs/heads/"..version.."#/lua-"..package..'-'..version..'.zip',
  }
 description = {
   detailed = "  ",
