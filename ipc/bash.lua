@@ -1,7 +1,7 @@
 #!/usr/bin/lua
 local posix = require 'posix'
 local subprocess = require 'subprocess'
-local posix_wait = require 'posix.sys.wait'
+--local posix_wait = require 'posix.sys.wait'
 local tempdir = require 'file.util.tempdir'
 local path = require 'path'
 local lfs = require 'lfs'
@@ -490,10 +490,16 @@ function IPC_Bash:close()
     end
 end
 
-function IPC_Bash:open(temp)
+function IPC_Bash:open(temp, procpid)
     if nil == self.pid then
+        if procpid <= 0
+        then
+            goto settemp
+        end
         if temp == nil
         then
+            procpid = 0
+            ::settemp::
             temp = tempdir.get_user_tempdir()
             temp = path.join(temp, random_chars(15))
         end
@@ -505,13 +511,17 @@ function IPC_Bash:open(temp)
         self.input = input
         self.output = output
         self.retcode = retcode
-        posix.mkfifo(input)
-        posix.mkfifo(output)
-        posix.mkfifo(retcode)
-        local bash = self.bash
-        local proc = subprocess.popen( { bash, '-c', self.BASH_PROGRAM, env={[self.BASH_SECRET_KEY..'temp']=temp} } )
-        self.proc = proc
-        self.pid = proc.pid
+        if procpid <= 0
+        then
+            posix.mkfifo(input)
+            posix.mkfifo(output)
+            posix.mkfifo(retcode)
+            local bash = self.bash
+            local proc = subprocess.popen( { bash, '-c', self.BASH_PROGRAM, env={[self.BASH_SECRET_KEY..'temp']=temp} } )
+ --       self.proc = proc
+            procpid = proc.pid
+        end
+        self.pid = procpid
  --       self.thread = coroutine.create(function()
  --           posix_wait.wait(proc.pid)
  --           self:flush()
@@ -553,7 +563,7 @@ function IPC_Bash:runcmd(data)
         local result = result:sub(pind+1)
         if self.pid == pid
         then
-            self.proc:wait()
+            posix.wait(self.pid)
             self.pid = nil
         end
     end
