@@ -490,10 +490,13 @@ function IPC_Bash:close()
     end
 end
 
-function IPC_Bash:open()
+function IPC_Bash:open(temp)
     if nil == self.pid then
-        local temp = tempdir.get_user_tempdir()
-        temp = path.join(temp, random_chars(15))
+        if temp == nil
+        then
+            temp = tempdir.get_user_tempdir()
+            temp = path.join(temp, random_chars(15))
+        end
         local input = path.join(temp, 'input.sock')
         local output = path.join(temp, 'output.sock')
         local retcode = path.join(temp, 'retcode.sock')
