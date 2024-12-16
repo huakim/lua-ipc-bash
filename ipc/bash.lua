@@ -492,20 +492,36 @@ end
 
 function IPC_Bash:open(temp, procpid)
     if nil == self.pid then
-        if procpid <= 0
-        then
-            goto settemp
-        end
         if temp == nil
         then
             procpid = 0
-            ::settemp::
+        end
+        ::renew::
+        if procpid <= 0
+        then
             temp = tempdir.get_user_tempdir()
             temp = path.join(temp, random_chars(15))
         end
         local input = path.join(temp, 'input.sock')
         local output = path.join(temp, 'output.sock')
         local retcode = path.join(temp, 'retcode.sock')
+
+        if (procpid > 0)
+        then
+            local input_exists = path.exists(input)
+            local output_exists = path.exists(output)
+            local retcode_exists = path.exists(retcode)
+
+            if not (input_exists and output_exists and retcode_exists)
+            then
+                procpid = 0
+                if not (input_exists or output_exists or retcode_exists)
+                then
+                    goto renew
+                end
+            end
+        end
+
         self.temp = temp
         lfs.mkdir(temp)
         self.input = input
