@@ -481,7 +481,7 @@ end
 
 function IPC_Bash:close()
     if self.pid then
-        posix.kill(self.pid)
+        posix.kill(self.pid, posix.signal.SIGKILL)
         self:flush()
         self.pid = nil
         self.proc = nil
@@ -492,6 +492,13 @@ end
 
 function IPC_Bash:open(temp, procpid)
     if nil == self.pid then
+        if procpid > 0
+        then
+            if posix.kill(procpid, posix.signal.SIGINFO) == nil
+            then
+                procpid = 0
+            end
+        end
         if temp == nil
         then
             procpid = 0
@@ -515,7 +522,7 @@ function IPC_Bash:open(temp, procpid)
             if not (input_exists and output_exists and retcode_exists)
             then
                 procpid = 0
-                if not (input_exists or output_exists or retcode_exists)
+                if input_exists or output_exists or retcode_exists
                 then
                     goto renew
                 end
